@@ -92,6 +92,120 @@ CBS (Renner) - JS Code
   console.log('Downloaded', final.length, 'rows. Sample:', final.slice(0,10));
 })();
 
-NFL.COM - JS
+##Charlie Campbell - https://walterfootball.com/nfldraftbigboard2026.php
+
+(() => {
+  const norm = s => (s||'').replace(/\u00A0/g,' ').replace(/\s+/g,' ').trim();
+  const toInt = s => { const n = parseInt((s||'').replace(/[^\d]/g,''),10); return Number.isFinite(n) ? n : null; };
+
+  const rows = [];
+  const seenRanks = new Set();
+
+  // Helper: push if valid and not duplicate rank
+  const pushRow = (rank, name) => {
+    if (!name) return;
+    rank = Number(rank) || null;
+    if (!rank) return;
+    if (seenRanks.has(rank)) return;
+    seenRanks.add(rank);
+    rows.push({rank, name: norm(name)});
+  };
+
+  // 1) Table rows: assume first cell rank, second cell name
+  document.querySelectorAll('table').forEach(table => {
+    Array.from(table.querySelectorAll('tr')).forEach(tr => {
+      const tds = tr.querySelectorAll('td,th');
+      if (tds.length >= 2) {
+        const r = toInt(tds[0].innerText);
+        const n = norm(tds[1].innerText).replace(/\s*\(.*\)$/,'');
+        if (r && n) pushRow(r, n);
+      }
+    });
+  });
+
+  // 2) Ordered list / list items that start with a number or contain a .name block
+  Array.from(document.querySelectorAll('ol li, ul li, li')).forEach(li => {
+    // prefer explicit .name structure
+    const nameBlock = li.querySelector('.name, .player-name, .playerName, .name-block');
+    if (nameBlock) {
+      const first = nameBlock.querySelector('span')?.innerText || '';
+      const last = nameBlock.querySelector('strong, b')?.innerText || '';
+      const alt = li.querySelector('img')?.alt || '';
+      const linkText = li.querySelector('a')?.innerText || '';
+      const name = norm([first, last, linkText, alt].filter(Boolean).join(' ').trim());
+      // try to find rank nearby
+      let rank = toInt(li.innerText.match(/^\s*(\d{1,3})[.)]/)?.[1]) || toInt(li.dataset.rank) || null;
+      // check previous sibling text
+      if (!rank) {
+        const prev = li.previousElementSibling;
+        if (prev) rank = toInt(prev.innerText);
+      }
+      if (rank && name) pushRow(rank, name);
+    } else {
+      // fallback: li text like "1. Name"
+      const m = li.innerText.match(/^\s*(\d{1,3})[.)]\s+(.{2,120})/);
+      if (m) {
+        const r = toInt(m[1]);
+        const n = norm(m[2].split(/,|\(|—|–/)[0]);
+        if (r && n) pushRow(r, n);
+      }
+    }
+  });
+
+  // 3) Player blocks (common on fantasy sites)
+  Array.from(document.querySelectorAll('li[data-sentry-component], .player, .player-card, .playerRow, .prospect')).forEach(el => {
+    const nameDiv = el.querySelector('.name, .player-name, .playerName, .name-block');
+    const alt = el.querySelector('img')?.alt || '';
+    const link = el.querySelector('a[href*="/players/"], a[href*="/nfl/players/"]');
+    const linkText = link?.innerText || '';
+    const name = norm((nameDiv?.innerText || linkText || alt || '').replace(/\s*\(.*\)$/,''));
+    // rank: data attribute, preceding sibling, or number inside nearby text
+    let rank = toInt(el.dataset.rank) || toInt(el.getAttribute('data-rank')) || null;
+    if (!rank) {
+      const prev = el.previousElementSibling;
+      if (prev) rank = toInt(prev.innerText);
+    }
+    if (!rank) {
+      const txt = (el.innerText||'').match(/(\d{1,3})[.)]/);
+      rank = txt ? toInt(txt[1]) : null;
+    }
+    if (rank && name) pushRow(rank, name);
+  });
+
+  // 4) Global text scan fallback: lines like "1. Name"
+  if (!rows.length) {
+    const lines = (document.body.innerText || '').split('\n').map(l=>l.trim()).filter(Boolean);
+    lines.forEach(line => {
+      const m = line.match(/^\s*(\d{1,3})[.)]?\s+([A-Z][A-Za-z'`.\- ]{2,120})/);
+      if (m) pushRow(toInt(m[1]), norm(m[2]));
+    });
+  }
+
+  // If still empty, print a helpful sample element for you to copy
+  if (!rows.length) {
+    const sample = document.querySelector('article, main, body, .content, .page') || document.body;
+    const el = sample.querySelector('*');
+    console.error('No rank/name pairs found. Copy the outerHTML of a visible entry and paste it here. Example outerHTML printed below:');
+    console.log(el ? el.outerHTML.slice(0, 2000) : 'NO_ELEMENT_FOUND');
+    return;
+  }
+
+  // dedupe by rank and sort
+  const map = new Map();
+  rows.sort((a,b)=>a.rank-b.rank).forEach(r => { if (!map.has(r.rank)) map.set(r.rank, r.name); });
+  const out = Array.from(map.entries()).sort((a,b)=>a[0]-b[0]).map(([rank,name])=>({rank,name}));
+
+  // copy TSV and HTML table
+  const tsv = ['rank\tname', ...out.map(r => `${r.rank}\t${r.name.replace(/\t/g,' ')}`)].join('\n');
+  try {
+    navigator.clipboard.writeText(tsv).then(()=>console.log('TSV copied to clipboard — paste into Excel/Sheets.'), ()=>console.log(tsv));
+  } catch(e) {
+    console.log(tsv);
+  }
+  // also print CSV for visibility
+  console.log('rank,name');
+  out.forEach(r => console.log(`${r.rank},"${r.name.replace(/"/g,'""')}"`));
+  console.log(JSON.stringify(out, null, 2));
+})();
 
 
