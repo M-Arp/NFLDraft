@@ -268,3 +268,173 @@ CBS - Scrapper
   }
   console.log(JSON.stringify(rows, null, 2));
 })();
+
+##SAM TEETS##
+(() => {
+  const norm = s => (s||'').replace(/\u00A0/g,' ').replace(/\s+/g,' ').trim();
+  const lines = (document.querySelector('article')?.innerText || document.body.innerText || '').split('\n').map(l=>l.trim()).filter(Boolean);
+  const re = /^\s*(\d{1,3})[.)]?\s+([A-Z][A-Za-z'`.\- ]{2,120})/;
+  const rows = [];
+  for (const line of lines) {
+    const m = line.match(re);
+    if (m) rows.push([m[1], norm(m[2])]);
+  }
+  if (!rows.length) { console.error('No rank/name lines found. If entries are in table/cards, paste one entry outerHTML here.'); return; }
+  const tsv = ['rank\tname', ...rows.map(r => `${r[0]}\t${r[1].replace(/\t/g,' ')}`)].join('\n');
+  try { navigator.clipboard.writeText(tsv).then(()=>console.log('TSV copied to clipboard — paste into Excel/Sheets.'), ()=>console.log(tsv)); }
+  catch(e){ console.log(tsv); }
+  console.log(JSON.stringify(rows.slice(0,10), null, 2));
+})();
+
+##FANTASY PROS##
+
+(() => {
+  const norm = s => (s||'').replace(/\u00A0/g,' ').replace(/\s+/g,' ').trim();
+  const toInt = s => { const n = parseInt((s||'').replace(/[^\d]/g,''),10); return Number.isFinite(n) ? n : null; };
+  const rows = [];
+  const seen = new Set();
+
+  // 1) Table rows: rank in first cell, name usually in a link inside another cell
+  document.querySelectorAll('table tr').forEach(tr => {
+    const cells = Array.from(tr.querySelectorAll('td,th'));
+    if (cells.length >= 2) {
+      const r = toInt(cells[0].innerText);
+      // try common name locations: link in 2nd or 3rd cell, or plain text
+      const name = norm(cells[1].querySelector('a')?.innerText || cells[2]?.querySelector('a')?.innerText || cells[1].innerText || cells[2]?.innerText || '');
+      if (r && name && !seen.has(r)) { seen.add(r); rows.push({rank:r, name}); }
+    }
+  });
+
+  // 2) Fallback: rows where rank and name are in the same line like "1. John Doe"
+  if (!rows.length) {
+    const lines = (document.body.innerText || '').split('\n').map(l=>l.trim()).filter(Boolean);
+    const re = /^\s*(\d{1,3})[.)]?\s+([A-Z][A-Za-z'`.\- ]{2,120})/;
+    lines.forEach(line => {
+      const m = line.match(re);
+      if (m && !seen.has(Number(m[1]))) { seen.add(Number(m[1])); rows.push({rank:Number(m[1]), name:norm(m[2])}); }
+    });
+  }
+
+  if (!rows.length) { console.error('No rank/name pairs found. Inspect the table structure and adjust cell indexes.'); return; }
+
+  rows.sort((a,b)=>a.rank-b.rank);
+  const tsv = ['rank\tname', ...rows.map(r => `${r.rank}\t${r.name.replace(/\t/g,' ')}`)].join('\n');
+  try { navigator.clipboard.writeText(tsv).then(()=>console.log('TSV copied to clipboard — paste into Excel/Sheets.'), ()=>console.log(tsv)); }
+  catch(e) { console.log(tsv); }
+  console.log(JSON.stringify(rows, null, 2));
+})();
+
+###ATOZ###
+
+(() => {
+  const norm = s => (s||'').replace(/\u00A0/g,' ').replace(/\s+/g,' ').trim();
+  const toInt = s => { const n = parseInt((s||'').replace(/[^\d]/g,''),10); return Number.isFinite(n) ? n : null; };
+
+  // common team/college words to avoid accidentally selecting them
+  const teamWords = ['University','College','State','Team','NFL','CFB','Panthers','Dolphins','Bears','Chiefs','Eagles','Buccaneers','Cowboys','Giants','Patriots','Rams','Browns','Steelers','Packers','Seahawks','49ers','Commanders','Jets','Broncos','Chargers','Vikings','Saints','Bengals','Cardinals','Texans','Lions','Falcons','Jaguars','Raiders','Titans','Bills','Ravens','Colts'];
+
+  const rows = [];
+  const seen = new Set();
+
+  // Helper: decide if text looks like a player name
+  function looksLikeName(s) {
+    if (!s) return false;
+    const t = s.replace(/\s+/g,' ').trim();
+    if (t.length < 3 || t.length > 60) return false;
+    // must contain at least two words and start with capital letter
+    if (!/^[A-Z][a-zA-Z'`.\-]+(?:\s+[A-Z][a-zA-Z'`.\-]+)+$/.test(t)) return false;
+    // avoid obvious team/college words
+    for (const w of teamWords) if (t.includes(w)) return false;
+    return true;
+  }
+
+  // Primary: table rows where name is a link inside a cell
+  document.querySelectorAll('table tr').forEach(tr => {
+    const cells = Array.from(tr.querySelectorAll('td,th'));
+    if (cells.length < 2) return;
+    const rank = toInt(cells[0].innerText);
+    // prefer anchor that looks like a player link
+    let name = '';
+    const anchors = tr.querySelectorAll('a');
+    for (const a of anchors) {
+      const txt = norm(a.innerText);
+      const href = (a.getAttribute('href')||'').toLowerCase();
+      if (looksLikeName(txt) || /player|prospect|profile|nfl|draft/.test(href)) { name = txt; break; }
+    }
+    // fallback: check specific cells likely to contain name
+    if (!name) {
+      const candidates = [cells[1], cells[2], cells[3]].filter(Boolean);
+      for (const c of candidates) {
+        const txt = norm(c.querySelector('a')?.innerText || c.innerText);
+        if (looksLikeName(txt)) { name = txt; break; }
+      }
+    }
+    // final fallback: regex on the row text for "1. John Doe"
+    if (!name) {
+      const m = tr.innerText.match(/^\s*(\d{1,3})[.)]?\s+([A-Z][A-Za-z'`.\-]+\s+[A-Z][A-Za-z'`.\-]+)/);
+      if (m) name = norm(m[2]);
+    }
+
+    if (rank && name) {
+      // strip trailing parenthetical like college or team
+      name = name.replace(/\s*\(.*\)$/,'').trim();
+      if (!seen.has(rank)) { seen.add(rank); rows.push({rank, name}); }
+    }
+  });
+
+  // Secondary: scan article text lines if table approach failed
+  if (!rows.length) {
+    const lines = (document.querySelector('article')?.innerText || document.body.innerText || '').split('\n').map(l=>l.trim()).filter(Boolean);
+    const re = /^\s*(\d{1,3})[.)]?\s+([A-Z][A-Za-z'`.\-]+\s+[A-Z][A-Za-z'`.\-]+)/;
+    for (const line of lines) {
+      const m = line.match(re);
+      if (m && !seen.has(Number(m[1]))) {
+        rows.push({rank:Number(m[1]), name: norm(m[2])});
+        seen.add(Number(m[1]));
+      }
+    }
+  }
+
+  if (!rows.length) { console.error('No rank/name pairs found. Copy one entry outerHTML and paste it here for a tailored selector.'); return; }
+
+  rows.sort((a,b)=>a.rank-b.rank);
+  const tsv = ['rank\tname', ...rows.map(r => `${r.rank}\t${r.name.replace(/\t/g,' ')}`)].join('\n');
+  try { navigator.clipboard.writeText(tsv).then(()=>console.log('TSV copied to clipboard — paste into Excel or Sheets.'), ()=>console.log(tsv)); }
+  catch(e) { console.log(tsv); }
+  console.log(JSON.stringify(rows, null, 2));
+})();
+
+##SPORTING NEWS##
+
+(() => {
+  const clean = s => (s||'').replace(/\u00A0/g,' ').replace(/\s+/g,' ').trim();
+  const text = (document.querySelector('article')?.innerText || document.body.innerText || '');
+  const lines = text.split('\n').map(l=>clean(l)).filter(Boolean);
+  const rows = [];
+  const re = /^\s*(\d{1,3})[.)]?\s+(.+?)\s*(?:\(|—|–|-|,|$)/; // rank then name, stop at parentheses/dash/comma
+  for (const line of lines) {
+    const m = line.match(re);
+    if (!m) continue;
+    const rank = Number(m[1]);
+    if (!rank || rank < 1 || rank > 120) continue;
+    // clean name: remove trailing descriptors and timestamps
+    let name = m[2].replace(/\s*\b(ago|days?|hours?|minutes?)\b.*$/i,'').trim();
+    name = name.split(/—|–|-|\(|,|–/)[0].trim();
+    // keep only the likely name portion (2–5 capitalized words, allow Jr/II/III/IV)
+    const nm = name.match(/^([A-Z][a-zA-Z'`.-]+(?:\s+[A-Z][a-zA-Z'`.-]+){0,4}(?:\s+(?:Jr|II|III|IV))?)/);
+    const finalName = nm ? nm[1] : name.split('\n')[0].slice(0,80).trim();
+    rows.push({rank, name: finalName.replace(/\t/g,' ')});
+  }
+  // sort and dedupe by rank
+  rows.sort((a,b)=>a.rank-b.rank);
+  const unique = [];
+  const seen = new Set();
+  for (const r of rows) if (!seen.has(r.rank)) { seen.add(r.rank); unique.push(r); }
+  // if some ranks missing but names present, optionally fill sequentially (commented out)
+  // if (unique.length && unique[unique.length-1].rank < 120) { unique.forEach((r,i)=>{ if(!r.rank) r.rank = i+1; }); }
+  if (!unique.length) { console.error('No rank/name pairs found. Scroll to load content and run again, or paste one sample outerHTML for a tuned selector.'); return; }
+  const tsv = ['Rank\tName', ...unique.map(r=>`${r.rank}\t${r.name}`)].join('\n');
+  try { navigator.clipboard.writeText(tsv).then(()=>console.log('TSV copied to clipboard — paste into Excel/Sheets.'), ()=>console.log(tsv)); }
+  catch(e){ console.log(tsv); }
+  console.log(unique.slice(0,200));
+})();
